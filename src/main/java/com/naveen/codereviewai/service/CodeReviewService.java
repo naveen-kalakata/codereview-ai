@@ -14,8 +14,6 @@ import reactor.core.publisher.Flux;
 @Service
 public class CodeReviewService {
 
-    // Logger — one per class, always private static final
-    // LoggerFactory.getLogger(ThisClass.class) ties log messages to this class name
     private static final Logger log = LoggerFactory.getLogger(CodeReviewService.class);
 
     private final ChatClient chatClient;
@@ -49,7 +47,6 @@ public class CodeReviewService {
 
         log.info("Starting code review, code length: {} characters", code.length());
 
-        // RAG — retrieve relevant coding standards based on the submitted code
         String relevantStandards = codingStandardsService.findRelevantStandards(code);
 
         String userMessage = """
@@ -62,9 +59,6 @@ public class CodeReviewService {
                 %s
                 """.formatted(relevantStandards, code);
 
-        // .entity(ReviewResponse.class) — THIS IS THE MAGIC
-        // Spring AI tells Gemini: "respond in JSON matching this class structure"
-        // Then automatically deserializes the JSON into a ReviewResponse object
         ReviewResponse response = chatClient.prompt()
                 .user(userMessage)
                 .call()
@@ -77,12 +71,9 @@ public class CodeReviewService {
         return response;
     }
 
-    // Review a full PR with context — diff + file contents + PR description
     public ReviewResponse reviewPR(PRContext context) {
         log.info("Starting PR review: '{}'", context.getPrTitle());
 
-        // Build the file contents section
-        // Stream API: takes a list, transforms each item, joins them into one string
         String fileContents = context.getFiles().stream()
                 .map(file -> "=== FILE: %s ===\n%s".formatted(file.getFilename(), file.getContent()))
                 .collect(Collectors.joining("\n\n"));
@@ -118,19 +109,13 @@ public class CodeReviewService {
         return response;
     }
 
-    // STREAMING — returns a Flux (reactive stream) of String tokens
-    // Flux is from Project Reactor — think of it as a "lazy list that emits items over time"
-    // Instead of waiting for Gemini to finish, we get each word as it's generated
     public Flux<String> reviewCodeStream(String code) {
         if (code == null || code.isBlank()) {
-            // Flux.error() — creates a stream that immediately emits an error
-            // This is the reactive equivalent of "throw new Exception"
             return Flux.error(new IllegalArgumentException("Code cannot be empty"));
         }
 
-        log.info("Starting STREAMING code review, code length: {} characters", code.length());
+        log.info("Starting streaming code review, code length: {} characters", code.length());
 
-        // RAG — same retrieval step as the blocking version
         String relevantStandards = codingStandardsService.findRelevantStandards(code);
 
         String userMessage = """
@@ -143,12 +128,6 @@ public class CodeReviewService {
                 %s
                 """.formatted(relevantStandards, code);
 
-        // .stream() instead of .call() — THIS IS THE KEY DIFFERENCE
-        // .call()   → blocks, waits for full response, returns one object
-        // .stream() → returns immediately, emits tokens as Gemini generates them
-        //
-        // .content() → extracts just the text content from each chunk
-        // Returns Flux<String> — each String is a small piece (token) of the response
         return chatClient.prompt()
                 .user(userMessage)
                 .stream()

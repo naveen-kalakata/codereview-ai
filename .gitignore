@@ -40,3 +40,5 @@ build/
 .junie/
 META-INF/
 org/
+.learning-backup/
+src/test/java/com/naveen/codereviewai/learning/
