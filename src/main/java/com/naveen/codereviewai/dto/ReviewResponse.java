@@ -9,7 +9,6 @@ public class ReviewResponse {
     private List<String> security;
     private List<String> tests;
 
-    // Default constructor — Spring needs this to create the object from JSON
     public ReviewResponse() {
     }
 

@@ -1,0 +1,88 @@
+{
+  "family": "codereview-ai",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::856021348734:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "codereview-ai",
+      "image": "856021348734.dkr.ecr.us-east-2.amazonaws.com/codereview-ai:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "DATABASE_URL",
+          "value": "jdbc:postgresql://localhost:5432/codereview_ai"
+        },
+        {
+          "name": "DATABASE_USER",
+          "value": "naveen"
+        },
+        {
+          "name": "DATABASE_PASSWORD",
+          "value": "codereview"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "GEMINI_API_KEY",
+          "valueFrom": "arn:aws:ssm:us-east-2:856021348734:parameter/codereview-ai/gemini-api-key"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/codereview-ai",
+          "awslogs-region": "us-east-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "dependsOn": [
+        {
+          "containerName": "pgvector",
+          "condition": "START"
+        }
+      ]
+    },
+    {
+      "name": "pgvector",
+      "image": "pgvector/pgvector:pg16",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 5432,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "POSTGRES_USER",
+          "value": "naveen"
+        },
+        {
+          "name": "POSTGRES_PASSWORD",
+          "value": "codereview"
+        },
+        {
+          "name": "POSTGRES_DB",
+          "value": "codereview_ai"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/codereview-ai",
+          "awslogs-region": "us-east-2",
+          "awslogs-stream-prefix": "pgvector"
+        }
+      }
+    }
+  ]
+}
