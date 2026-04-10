@@ -1,102 +1,71 @@
-# ============================================================
-# DEPLOY WORKFLOW — Build Docker Image → Push to ECR → Deploy to ECS
-# ============================================================
-# This runs ONLY when code is merged/pushed to main.
-# PR → tests pass → merge → this workflow deploys to production.
-
 name: Deploy to ECS
 
-# WHEN does this run?
 on:
-  push:                     # trigger: code pushed (including merges)
-    branches: [ main ]      # only the main branch — never deploy from feature branches
+  push:
+    branches:
+      - main
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
 
+    env:
+      AWS_REGION: us-east-2
+      AWS_ACCOUNT_ID: "856021348734"
+      ECR_REPOSITORY: codereview-ai
+      IMAGE_URI: 856021348734.dkr.ecr.us-east-2.amazonaws.com/codereview-ai
+
+    services:
+      pgvector:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: naveen
+          POSTGRES_PASSWORD: codereview
+          POSTGRES_DB: codereview_ai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
-      # Clone the repo onto the VM
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      # ---- BUILD & TEST (safety net) ----
-      # Even though CI already tested the PR, we test AGAIN before deploying.
-      # Why? Someone might push directly to main, or a merge could introduce issues.
-      # Never deploy without testing.
-
-      # Install Java
-      - name: Set up JDK 17
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: maven                    # reuse cached dependencies from previous runs
+          distribution: temurin
+          java-version: 17
 
-      # Build + test — if this fails, the workflow stops. Nothing gets deployed.
-      - name: Build and Test
-        run: ./mvnw clean verify --no-transfer-progress
+      - name: Make Maven wrapper executable
+        run: chmod +x mvnw
 
-      # ---- AWS AUTHENTICATION ----
-      # The VM needs to talk to YOUR AWS account.
-      # These credentials let it push to ECR and update ECS.
+      - name: Run tests
+        run: ./mvnw test
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
-      - name: Configure AWS Credentials
+      - name: Build jar
+        run: ./mvnw clean package -DskipTests
+
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          # secrets.* = stored in GitHub Settings → Secrets (encrypted, not visible in logs)
-          # You set these with: gh secret set AWS_ACCESS_KEY_ID
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          # vars.* = stored in GitHub Settings → Variables (not secret, visible in logs)
-          # Used for non-sensitive config like region names
-          aws-region: ${{ vars.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      # ---- DOCKER BUILD & PUSH TO ECR ----
-      # ECR (Elastic Container Registry) = AWS's Docker Hub
-      # We build the Docker image, then push it to ECR so ECS can pull it.
-
-      # Log into ECR — like "docker login" but for AWS
-      - name: Login to Amazon ECR
-        id: ecr-login                    # "id" lets the next step access this step's output
+      - name: Log in to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
-        # After this, ${{ steps.ecr-login.outputs.registry }} = "123456789.dkr.ecr.us-east-1.amazonaws.com"
 
-      # Build the Docker image and push it
-      - name: Build and Push Docker Image
-        env:
-          # ECR_REGISTRY — the ECR URL from the login step above
-          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          # ECR_REPOSITORY — the name of your ECR repository
-          ECR_REPOSITORY: codereview-ai
-          # IMAGE_TAG — unique tag for this build
-          # github.sha = the full commit hash (e.g., "a1b2c3d4...")
-          # Every commit gets a unique image — you can always roll back
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          # Build image with commit hash tag: 123456.dkr.ecr.../codereview-ai:a1b2c3d4
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          # Also tag as "latest" — ECS uses this to find the newest image
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
-          # Push both tags to ECR
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+      - name: Build Docker image
+        run: docker build -t $IMAGE_URI:latest .
 
-      # ---- DEPLOY TO ECS ----
-      # ECS (Elastic Container Service) = runs your Docker containers
-      # "update-service --force-new-deployment" tells ECS:
-      #   "Pull the latest image from ECR and restart the containers"
+      - name: Push Docker image
+        run: docker push $IMAGE_URI:latest
 
       - name: Deploy to ECS
-        env:
-          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          ECR_REPOSITORY: codereview-ai
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          # Tell ECS to pull the new image and restart
-          # --cluster = which ECS cluster (you set this in GitHub Variables)
-          # --service = which service in that cluster
-          # --force-new-deployment = "restart even if the task definition hasn't changed"
-          aws ecs update-service \
-            --cluster ${{ vars.ECS_CLUSTER }} \
-            --service ${{ vars.ECS_SERVICE }} \
-            --force-new-deployment
+        run: aws ecs update-service --cluster fortune-cluster --service codereview-ai-service --force-new-deployment --region $AWS_REGION

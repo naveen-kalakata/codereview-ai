@@ -21,7 +21,6 @@ public class GitHubService {
         this.restClient = restClient;
     }
 
-    // Fetches everything the AI needs to review a PR
     public PRContext getPRContext(String owner, String repo, int prNumber) {
         log.info("Fetching full PR context: {}/{}/pull/{}", owner, repo, prNumber);
 
@@ -30,7 +29,6 @@ public class GitHubService {
         List<PRContext.FileContent> files = fetchChangedFiles(owner, repo, prNumber);
 
         String title = prDetails.get("title").asText();
-        // body can be null if PR has no description
         String description = prDetails.has("body") && !prDetails.get("body").isNull()
                 ? prDetails.get("body").asText()
                 : "No description provided";
@@ -39,7 +37,6 @@ public class GitHubService {
         return new PRContext(diff, title, description, files);
     }
 
-    // 1. Fetch the diff — what lines changed
     private String fetchDiff(String owner, String repo, int prNumber) {
         return restClient.get()
                 .uri("/repos/{owner}/{repo}/pulls/{prNumber}", owner, repo, prNumber)
@@ -48,8 +45,6 @@ public class GitHubService {
                 .body(String.class);
     }
 
-    // 2. Fetch PR metadata — title, description
-    // JsonNode is Jackson's tree model — lets us read JSON without creating a class for it
     private JsonNode fetchPRDetails(String owner, String repo, int prNumber) {
         return restClient.get()
                 .uri("/repos/{owner}/{repo}/pulls/{prNumber}", owner, repo, prNumber)
@@ -57,9 +52,7 @@ public class GitHubService {
                 .body(JsonNode.class);
     }
 
-    // 3. Fetch the full content of each changed file
     private List<PRContext.FileContent> fetchChangedFiles(String owner, String repo, int prNumber) {
-        // GitHub returns an array of file objects with filename, status, raw_url, etc.
         JsonNode filesArray = restClient.get()
                 .uri("/repos/{owner}/{repo}/pulls/{prNumber}/files", owner, repo, prNumber)
                 .retrieve()
@@ -72,17 +65,13 @@ public class GitHubService {
                 String filename = file.get("filename").asText();
                 String status = file.get("status").asText();
 
-                // Skip deleted files — no content to review
-                // Skip non-code files like images, binaries
                 if ("removed".equals(status) || isNonCodeFile(filename)) {
                     continue;
                 }
 
-                // raw_url points to the actual file content on GitHub
                 String rawUrl = file.has("raw_url") ? file.get("raw_url").asText() : null;
                 if (rawUrl != null) {
                     try {
-                        // Fetch the full file content directly from the raw URL
                         String content = RestClient.create().get()
                                 .uri(rawUrl)
                                 .retrieve()
@@ -99,7 +88,6 @@ public class GitHubService {
         return files;
     }
 
-    // Simple check — skip images, binaries, configs that aren't useful for code review
     private boolean isNonCodeFile(String filename) {
         String lower = filename.toLowerCase();
         return lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".gif")

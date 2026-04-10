@@ -2,16 +2,13 @@ package com.naveen.codereviewai.dto;
 
 import java.util.List;
 
-// Holds everything the AI needs to review a PR intelligently
 public class PRContext {
 
-    private String diff;                // what changed
-    private String prTitle;             // what the developer says they did
-    private String prDescription;       // why they did it
-    private List<FileContent> files;    // full content of changed files
+    private String diff;
+    private String prTitle;
+    private String prDescription;
+    private List<FileContent> files;
 
-    // Inner class — a simple container for filename + content
-    // Lives inside PRContext because it only makes sense in this context
     public static class FileContent {
         private String filename;
         private String content;

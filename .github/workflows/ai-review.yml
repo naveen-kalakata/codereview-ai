@@ -1,80 +1,40 @@
-# ============================================================
-# AI CODE REVIEW WORKFLOW
-# ============================================================
-# When someone opens a PR, this workflow:
-#   1. Grabs the diff (what changed)
-#   2. Sends it to Gemini for review
-#   3. Posts the AI review as a comment on the PR
-#
-# The result: every PR automatically gets an AI code review comment.
-
 name: AI Code Review
 
-# WHEN does this run?
 on:
   pull_request:
-    branches: [ main ]                    # only PRs targeting main
-    types: [ opened, synchronize ]        # "opened" = new PR created
-                                          # "synchronize" = new commits pushed to existing PR
-                                          # We DON'T include "closed" — no point reviewing merged/closed PRs
+    branches: [ main ]
+    types: [ opened, synchronize ]
 
 jobs:
   review:
     runs-on: ubuntu-latest
 
-    # permissions — what can this workflow do?
-    # By default, workflows can READ the repo but can't WRITE anything.
-    # We need "write" to post comments on the PR.
     permissions:
       pull-requests: write
 
     steps:
-      # Clone the repo with full git history
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0     # 0 = fetch ALL commits, not just the latest
-                             # We need full history to compute the diff between branches
+          fetch-depth: 0
 
-      # ---- STEP 1: Get the PR diff ----
-      # "id: diff" — gives this step a name so later steps can reference its output
       - name: Get PR Diff
         id: diff
         run: |
-          # gh pr diff — uses GitHub CLI to get the diff for this PR
-          # ${{ github.event.pull_request.number }} — the PR number (e.g., 42)
-          #   This variable is automatically set by GitHub when the workflow runs
-          # ${{ github.repository }} — "naveen-kalakata/codereview-ai"
           DIFF=$(gh pr diff ${{ github.event.pull_request.number }} --repo ${{ github.repository }})
-
-          # Save diff to a temp file — diffs can be huge, too big for shell variables
           echo "$DIFF" > /tmp/pr_diff.txt
           echo "Diff length: $(wc -c < /tmp/pr_diff.txt) bytes"
         env:
-          # GH_TOKEN — GitHub CLI needs authentication to access the API
-          # secrets.GITHUB_TOKEN — automatically created by GitHub for every workflow run
-          # You don't have to set this up — it's always available
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ---- STEP 2: Send diff to Gemini for review ----
       - name: AI Review
         id: review
         run: |
-          # Read the diff from the temp file
           DIFF=$(cat /tmp/pr_diff.txt)
 
-          # Truncate if diff is too large (Gemini has token limits ~30k chars)
-          # ${#DIFF} = length of the string in bash
           if [ ${#DIFF} -gt 30000 ]; then
             DIFF="${DIFF:0:30000}... (truncated)"
           fi
 
-          # Call Gemini API directly using curl (no Spring Boot needed)
-          # This is the same REST API our Spring AI app uses under the hood
-          #
-          # curl -s = silent (no progress bar)
-          # The URL is Gemini's generateContent endpoint with our API key
-          # jq -n = create JSON from scratch (safer than string interpolation)
-          # --arg diff "$DIFF" = pass the diff as a JSON-safe variable
           RESPONSE=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${{ secrets.GEMINI_API_KEY }}" \
             -H "Content-Type: application/json" \
             -d "$(jq -n --arg diff "$DIFF" --arg title "${{ github.event.pull_request.title }}" '{
@@ -85,29 +45,17 @@ jobs:
               }]
             }')")
 
-          # Extract just the text from Gemini's JSON response
-          # jq -r = raw output (no quotes)
-          # .candidates[0].content.parts[0].text = path to the actual review text
-          # // "Failed..." = fallback if the path doesn't exist (API error)
           REVIEW=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // "Failed to generate review"')
-
-          # Save review to file (handles newlines and special characters safely)
           echo "$REVIEW" > /tmp/review.txt
         env:
-          # secrets.GEMINI_API_KEY — YOUR Gemini key, stored in GitHub Secrets
-          # You set this manually with: gh secret set GEMINI_API_KEY
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
-      # ---- STEP 3: Post the review as a PR comment ----
       - name: Post Review Comment
         run: |
           REVIEW=$(cat /tmp/review.txt)
-
-          # gh pr comment — posts a comment on the PR
-          # --body "..." — the comment content (markdown supported)
           gh pr comment ${{ github.event.pull_request.number }} \
             --repo ${{ github.repository }} \
-            --body "## 🤖 AI Code Review
+            --body "## AI Code Review
 
           $REVIEW
 

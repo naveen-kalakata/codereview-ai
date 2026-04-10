@@ -28,7 +28,16 @@ public class CodingStandardsService {
 
     @PostConstruct
     public void loadStandards() {
-        log.info("Loading coding standards into vector store...");
+        List<Document> existing = vectorStore.similaritySearch(
+                SearchRequest.builder().query("java coding standards").topK(1).build()
+        );
+
+        if (!existing.isEmpty()) {
+            log.info("Coding standards already loaded in pgvector — skipping reload");
+            return;
+        }
+
+        log.info("Loading coding standards into pgvector...");
 
         try {
             ClassPathResource resource = new ClassPathResource("standards/java-standards.md");
@@ -45,7 +54,7 @@ public class CodingStandardsService {
             }
 
             vectorStore.add(documents);
-            log.info("Loaded {} coding standards into vector store", documents.size());
+            log.info("Loaded {} coding standards into pgvector", documents.size());
 
         } catch (IOException e) {
             log.error("Failed to load coding standards file", e);
