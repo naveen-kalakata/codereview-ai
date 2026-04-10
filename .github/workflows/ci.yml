@@ -8,6 +8,21 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    services:
+      pgvector:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: naveen
+          POSTGRES_PASSWORD: codereview
+          POSTGRES_DB: codereview_ai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -20,3 +35,5 @@ jobs:
 
       - name: Build and Test
         run: ./mvnw clean verify --no-transfer-progress
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
